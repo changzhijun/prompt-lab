@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>文件上传与推理</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 80%;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .upload-area {
+            margin-bottom: 15px;
+        }
+        .file-info {
+            margin: 10px 0;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .button-group {
+            margin-top: 15px;
+            text-align: center;
+        }
+        button {
+            padding: 4px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #1890ff;
+            color: white;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #40a9ff;
+        }
+        #inferBtn {
+            background-color: #52c41a;
+            width: 165px;
+            padding: 7px 15px;
+        }
+        #inferBtn:hover {
+            background-color: #73d13d;
+        }
+        #inferBtn:disabled {
+            background-color: #f07f09; /* 禁用时的灰色背景 */
+            color: #FFF; /* 文字颜色变灰 */
+            cursor: not-allowed; /* 鼠标变为禁用样式 */
+        }
+        .delete-btn {
+            background-color: #ff4d4f;
+            padding: 4px 15px;
+            font-size: 12px;
+        }
+        .delete-btn:hover {
+            background-color: #ff7875;
+        }
+        /* 隐藏真实的 input[type="file"] */
+        input[type="file"] {
+            display: none;
+        }
+        /* 推理输出样式 */
+        #output {
+            min-height: 200px;
+            word-wrap: break-word;
+        }
+        #reasoning, #result {
+            line-height: 1.6;
+        }
+        #reasoning h3, #result h3 {
+            font-size: 16px;
+            color: #333;
+            margin: 0 0 10px 0;
+        }
+        #result h2 {
+            font-size: 20px;
+            color: #000000;
+            margin: 15px 0 10px;
+        }
+        #result p {
+            margin: 10px 0;
+        }
+        #result ul {
+            padding-left: 20px;
+        }
+        #result li {
+            margin: 5px 0;
+        }
+        #reasoning {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e8e8e8; /* 分隔线 */
+        }
+        h2 {
+            margin-top: 0;
+            color: #333;
+            font-size: 18px;
+        }
+        /* 轻提示样式 */
+        .toast {
+            display: none;
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .toast.show {
+            display: block;
+            opacity: 1;
+        }
+        @media (max-width: 768px) {
+            .container {
+                width: 95%;
+            }
+            .section {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p style="margin: 0;padding: 0;">Welcome to the Deepseek + Qdrant (RAG) Non-Service Simple Testing Page!</p>
+        <div class="section">
+            <h2>Upload Files</h2>
+            <div class="upload-area">
+               <label>User Question:</label>
+                <div style="display: flex;align-items: center;margin-top: 10px;">
+                    <div>
+                         <button id="txtBtn">Select File</button>
+                         <input type="file" id="txtUpload" accept=".txt">
+                    </div>
+                    <div class="file-info" id="txtInfo" style="margin-left: 10px;"></div>
+                </div>
+            </div>
+            <div class="upload-area">
+               <label>Prompt Engineering:</label>
+                <div style="display: flex;align-items: center;margin-top: 10px;">
+                    <div>
+                         <button id="mdBtn">Select File</button>
+                         <input type="file" id="mdUpload" accept=".md">
+                    </div>
+                    <div class="file-info" id="mdInfo" style="margin-left: 10px;"></div>
+                </div>
+            </div>
+            <div class="button-group">
+                <button id="inferBtn">Deepseek Inference</button>
+            </div>
+        </div>
+        <div class="section">
+            <h2 id="tl">Model Response</h2>
+            <div id="output">
+                <div id="reasoning"></div>
+                <div id="result"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 轻提示 -->
+    <div id="toast" class="toast">
+        <p>Please upload question file(.txt)！</p>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            let txtFile = null;
+            let mdFile = null;
+
+            // 点击按钮触发文件选择
+            $('#txtBtn').on('click', function() {
+                $('#txtUpload').click();
+            });
+
+            $('#mdBtn').on('click', function() {
+                $('#mdUpload').click();
+            });
+
+            // 处理 .txt 文件上传
+            $('#txtUpload').on('change', function(e) {
+                txtFile = e.target.files[0];
+                if (txtFile) {
+                    const sizeKB = (txtFile.size / 1024).toFixed(2);
+                    $('#txtInfo').html(`${txtFile.name}, 大小: ${sizeKB}KB <button class="delete-btn" data-type="txt">Delete</button>`);
+                    console.log('txtFile:', txtFile);
+                } else {
+                    $('#txtInfo').text('');
+                }
+            });
+
+            // 处理 .md 文件上传
+            $('#mdUpload').on('change', function(e) {
+                mdFile = e.target.files[0];
+                if (mdFile) {
+                    const sizeKB = (mdFile.size / 1024).toFixed(2);
+                    $('#mdInfo').html(`${mdFile.name}, 大小: ${sizeKB}KB <button class="delete-btn" data-type="md">Delete</button>`);
+                    console.log('mdFile:', mdFile);
+                } else {
+                    $('#mdInfo').text('');
+                }
+            });
+
+            // 删除文件
+            $(document).on('click', '.delete-btn', function() {
+                const type = $(this).data('type');
+                if (type === 'txt') {
+                    txtFile = null;
+                    $('#txtInfo').text('');
+                    $('#txtUpload').val('');
+                } else if (type === 'md') {
+                    mdFile = null;
+                    $('#mdInfo').text('');
+                    $('#mdUpload').val('');
+                }
+            });
+
+            // 推理按钮点击事件
+            $('#inferBtn').on('click', function() {
+                if (!txtFile) {
+                    $('#toast').addClass('show');
+                    setTimeout(() => $('#toast').removeClass('show'), 3000);
+                    return;
+                }
+
+                // 禁用按钮并置灰
+                $('#inferBtn').prop('disabled', true);
+
+                const startTime = new Date().getTime();
+                const formData = new FormData();
+                formData.append('input', txtFile);
+                if (mdFile) formData.append('prompt', mdFile);
+
+                // 显示“正在处理...”并启动计时器
+                $('#output').text('Inferring...  (elapsed time: 0 seconds)');
+                const timer = setInterval(() => {
+                    const currentTime = new Date().getTime();
+                    const duration = (currentTime - startTime) / 1000;
+                    $('#output').text(`Inferring...  (elapsed time: ${duration.toFixed(1)} seconds)`);
+                }, 100);
+
+                //axios.post('http://10.3.11.81:8001/api/chat', formData, {
+                axios.post('http://127.0.0.1:8001/api/chat', formData, {
+                    headers: {
+                        'Content-Type': 'multipart/form-data'
+                    }
+                }).then(response => {
+                    clearInterval(timer);
+                    const endTime = new Date().getTime();
+                    const duration = (endTime - startTime) / 1000;
+
+                    const data = response.data.choices[0].message;
+                    console.log('Response Data:', response.data);
+
+                    // 清空输出区域，然后显示过程和结果
+                    $('#output').empty();
+                    $('#output').append('<div id="reasoning"></div><div id="result"></div>');
+
+                    // 显示推理过程（带标题）
+                    $('#reasoning').html(`<h3>( Reasoning Content )</h3>${data.reasoning_content}`);
+
+                    // 显示推理结果（带标题和 Markdown 渲染）
+                    const content = data.content
+                        .replace(/^##\s(.+)$/gm, '<h3>$1</h3>').replace(/^###\s(.+)$/gm, '<h4>$1</h4>')
+                        .replace(/^\s*-\s(.+)$/gm, '<li>$1</li>')
+                        .replace(/<li>(.*?)<\/li>/g, '<ul>$&</ul>')
+                        .replace(/\n\n/g, '<p></p>');
+                    $('#result').html(`<h3>( Inference Content )</h3>${content}`);
+                    $('#tl').html(`Model Response (elapsed time: ${duration.toFixed(2)} seconds)`);
+
+                    // 接口返回后恢复按钮状态
+                    $('#inferBtn').prop('disabled', false);
+
+                }).catch(error => {
+                    clearInterval(timer);
+                    const endTime = new Date().getTime();
+                    const duration = (endTime - startTime) / 1000;
+                    console.error('request failed:', error);
+                    $('#output').text(`Inferring Failed (elapsed time:${duration.toFixed(2)} seconds):` + error.message);
+
+                    // 接口失败后恢复按钮状态
+                    $('#inferBtn').prop('disabled', false);
+                });
+            });
+        });
+    </script>
+</body>
+</html>
